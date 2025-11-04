@@ -11,6 +11,11 @@ BOT_THREAD = None
 STOP_EVENT = threading.Event()
 LOGS = []
 SESSION_FILE = "session.json"
+STATS = {
+    "total_welcomed": 0,
+    "today_welcomed": 0,
+    "last_reset": datetime.now().date()
+}
 
 
 def log(msg):
@@ -18,7 +23,7 @@ def log(msg):
     print(msg)
 
 
-def run_bot(username, password, welcome_messages, group_ids, delay, poll_interval, use_custom_name):
+def run_bot(username, password, welcome_messages, group_ids, delay, poll_interval, use_custom_name, enable_commands):
     cl = Client()
     try:
         if os.path.exists(SESSION_FILE):
@@ -34,20 +39,28 @@ def run_bot(username, password, welcome_messages, group_ids, delay, poll_interva
         log(f"⚠️ Login failed: {e}")
         return
 
-    log("🤖 Bot started — Monitoring for NEW members...")
+    log("🤖 Bot started — Monitoring for NEW members and COMMANDS...")
     
-    # Track existing members initially
+    # Track existing members and last message IDs
     known_members = {}
+    last_message_ids = {}
+    
     for gid in group_ids:
         try:
             group = cl.direct_thread(gid)
             known_members[gid] = {user.pk for user in group.users}
+            last_message_ids[gid] = group.messages[0].id if group.messages else None
             log(f"📊 Tracking {len(known_members[gid])} existing members in group {gid}")
         except Exception as e:
             log(f"⚠️ Error loading group {gid}: {e}")
             known_members[gid] = set()
+            last_message_ids[gid] = None
 
-    welcome_count = 0
+    # Reset daily stats if new day
+    global STATS
+    if STATS["last_reset"] != datetime.now().date():
+        STATS["today_welcomed"] = 0
+        STATS["last_reset"] = datetime.now().date()
 
     while not STOP_EVENT.is_set():
         try:
@@ -57,9 +70,102 @@ def run_bot(username, password, welcome_messages, group_ids, delay, poll_interva
                     
                 try:
                     group = cl.direct_thread(gid)
-                    current_members = {user.pk for user in group.users}
                     
-                    # Find NEW members (not in known_members)
+                    # ==================== COMMAND HANDLING ====================
+                    if enable_commands:
+                        new_messages = []
+                        if last_message_ids[gid]:
+                            for msg in group.messages:
+                                if msg.id == last_message_ids[gid]:
+                                    break
+                                new_messages.append(msg)
+                        
+                        for msg in reversed(new_messages):
+                            if msg.user_id == cl.user_id:  # Skip bot's own messages
+                                continue
+                            
+                            text = msg.text.strip().lower() if msg.text else ""
+                            
+                            # /help command
+                            if text == "/help" or text == "!help":
+                                help_text = """🤖 *BOT COMMANDS*
+
+/help - Show this help menu
+/stats - Show welcome statistics
+/count - Show total members
+/welcome - Manual welcome test
+/ping - Check if bot is alive
+/time - Show current time
+/about - About this bot
+
+Type any command to use!"""
+                                cl.direct_send(help_text, thread_ids=[gid])
+                                log(f"📝 Sent help menu to group {gid}")
+                            
+                            # /stats command
+                            elif text == "/stats" or text == "!stats":
+                                stats_text = f"""📊 *WELCOME STATISTICS*
+
+Total Welcomed: {STATS['total_welcomed']}
+Today Welcomed: {STATS['today_welcomed']}
+Bot Status: ✅ Active
+Monitoring Groups: {len(group_ids)}"""
+                                cl.direct_send(stats_text, thread_ids=[gid])
+                                log(f"📊 Sent stats to group {gid}")
+                            
+                            # /count command
+                            elif text == "/count" or text == "!count":
+                                member_count = len(group.users)
+                                count_text = f"👥 *GROUP MEMBERS*
+
+Total Members: {member_count} members"
+                                cl.direct_send(count_text, thread_ids=[gid])
+                                log(f"👥 Sent member count to group {gid}")
+                            
+                            # /welcome command (manual test)
+                            elif text == "/welcome" or text == "!welcome":
+                                sender = next((u for u in group.users if u.pk == msg.user_id), None)
+                                if sender:
+                                    test_msg = f"@{sender.username} This is a test welcome message! 👋"
+                                    cl.direct_send(test_msg, thread_ids=[gid])
+                                    log(f"🧪 Sent test welcome to @{sender.username}")
+                            
+                            # /ping command
+                            elif text == "/ping" or text == "!ping":
+                                cl.direct_send("🏓 Pong! Bot is alive and running!", thread_ids=[gid])
+                                log(f"🏓 Responded to ping in group {gid}")
+                            
+                            # /time command
+                            elif text == "/time" or text == "!time":
+                                current_time = datetime.now().strftime("%I:%M %p, %d %b %Y")
+                                time_text = f"🕐 *CURRENT TIME*
+
+{current_time}"
+                                cl.direct_send(time_text, thread_ids=[gid])
+                                log(f"🕐 Sent time to group {gid}")
+                            
+                            # /about command
+                            elif text == "/about" or text == "!about":
+                                about_text = """ℹ️ *ABOUT THIS BOT*
+
+Name: Instagram Welcome Bot
+Version: 2.0
+Features:
+• Auto-welcome new members
+• Command system
+• Statistics tracking
+• 24/7 monitoring
+
+Created with ❤️"""
+                                cl.direct_send(about_text, thread_ids=[gid])
+                                log(f"ℹ️ Sent about info to group {gid}")
+                        
+                        # Update last message ID
+                        if group.messages:
+                            last_message_ids[gid] = group.messages[0].id
+                    
+                    # ==================== NEW MEMBER DETECTION ====================
+                    current_members = {user.pk for user in group.users}
                     new_members = current_members - known_members[gid]
                     
                     if new_members:
@@ -80,8 +186,9 @@ def run_bot(username, password, welcome_messages, group_ids, delay, poll_interva
                                         final_msg = msg
                                     
                                     cl.direct_send(final_msg, thread_ids=[gid])
-                                    welcome_count += 1
-                                    log(f"🎉 [{welcome_count}] Welcomed NEW member @{user.username} (Name: {user.full_name}) in group {gid}")
+                                    STATS["total_welcomed"] += 1
+                                    STATS["today_welcomed"] += 1
+                                    log(f"🎉 Welcomed NEW member @{user.username} in group {gid}")
                                     log(f"   📤 Sent: '{final_msg}'")
                                     
                                     # Delay between messages
@@ -114,7 +221,7 @@ def run_bot(username, password, welcome_messages, group_ids, delay, poll_interva
         except Exception as e:
             log(f"⚠️ Loop error: {e}")
 
-    log(f"🛑 Bot stopped. Total new members welcomed: {welcome_count}")
+    log(f"🛑 Bot stopped. Total welcomed: {STATS['total_welcomed']}")
 
 
 @app.route("/")
@@ -136,15 +243,20 @@ def start_bot():
     delay = int(request.form.get("delay", 3))
     poll = int(request.form.get("poll", 10))
     use_custom_name = request.form.get("use_custom_name") == "yes"
+    enable_commands = request.form.get("enable_commands") == "yes"
 
     if not username or not password or not group_ids or not welcome:
         return jsonify({"message": "⚠️ Please fill all required fields."})
 
     STOP_EVENT.clear()
-    BOT_THREAD = threading.Thread(target=run_bot, args=(username, password, welcome, group_ids, delay, poll, use_custom_name), daemon=True)
+    BOT_THREAD = threading.Thread(
+        target=run_bot, 
+        args=(username, password, welcome, group_ids, delay, poll, use_custom_name, enable_commands), 
+        daemon=True
+    )
     BOT_THREAD.start()
     log("🚀 Bot thread started.")
-    return jsonify({"message": "✅ Bot started! Monitoring for new members..."})
+    return jsonify({"message": "✅ Bot started! Monitoring for new members and commands..."})
 
 
 @app.route("/stop", methods=["POST"])
@@ -165,13 +277,18 @@ def get_logs():
     return jsonify({"logs": LOGS[-200:]})
 
 
+@app.route("/stats")
+def get_stats():
+    return jsonify(STATS)
+
+
 PAGE_HTML = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>INSTA AUTO WELCOME BOT</title>
+<title>INSTA COMMAND BOT</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
 
@@ -433,6 +550,31 @@ h3 {
   font-weight: 500;
 }
 
+.command-box {
+  background: rgba(255,165,0,0.1);
+  border: 2px solid rgba(255,165,0,0.4);
+  border-radius: 15px;
+  padding: 20px;
+  margin-bottom: 30px;
+  color: #ffa500;
+  font-size: 15px;
+  line-height: 1.8;
+}
+
+.command-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  margin-top: 15px;
+}
+
+.command-item {
+  background: rgba(0,0,0,0.3);
+  padding: 10px;
+  border-radius: 8px;
+  font-family: monospace;
+}
+
 @media (max-width: 768px) {
   .container {
     padding: 40px 25px;
@@ -474,23 +616,38 @@ h3 {
 </head>
 <body>
   <div class="container">
-    <h1>🤖 INSTA AUTO WELCOME BOT 🤖</h1>
+    <h1>🤖 INSTA COMMAND BOT 🤖</h1>
     
     <div class="special-box">
-      <strong>🎯 AUTOMATIC NEW MEMBER DETECTION 🎯</strong><br>
-      ✅ Bot silently monitors groups for NEW members<br>
-      ✅ When someone joins → Instant automatic welcome!<br>
-      ✅ Only NEW members get welcomed (existing members ignored)<br>
-      ✅ Bot stays silent until a new member joins
+      <strong>⚡ AUTO WELCOME + COMMAND SYSTEM ⚡</strong><br>
+      ✅ Automatically welcomes new members<br>
+      ✅ Responds to commands in group chat<br>
+      ✅ Real-time statistics tracking<br>
+      ✅ Interactive bot features
+    </div>
+
+    <div class="command-box">
+      <strong>🎮 AVAILABLE COMMANDS:</strong>
+      <div class="command-list">
+        <div class="command-item">/help - Help menu</div>
+        <div class="command-item">/stats - Statistics</div>
+        <div class="command-item">/count - Member count</div>
+        <div class="command-item">/welcome - Test welcome</div>
+        <div class="command-item">/ping - Check bot</div>
+        <div class="command-item">/time - Current time</div>
+        <div class="command-item">/about - Bot info</div>
+      </div>
+      <div class="label-subtitle" style="margin-top: 15px;">
+        Type any command in group chat to use! Works with / or ! prefix
+      </div>
     </div>
 
     <div class="info-box">
       <strong>✨ HOW IT WORKS:</strong><br>
-      • 🔍 <strong>Smart Monitoring:</strong> Bot tracks all group members<br>
-      • 🆕 <strong>Detects New Joins:</strong> Instantly identifies when someone new joins<br>
-      • 🎉 <strong>Auto Welcome:</strong> Sends welcome messages only to NEW members<br>
-      • 😴 <strong>Silent Mode:</strong> No spam - only welcomes actual new joiners<br>
-      • 📁 <strong>TXT File Support:</strong> Upload multiple welcome messages
+      • 🔍 <strong>Auto Welcome:</strong> Detects and welcomes new members<br>
+      • 💬 <strong>Command System:</strong> Responds to commands in group<br>
+      • 📊 <strong>Statistics:</strong> Tracks welcomes and activity<br>
+      • 🎯 <strong>Interactive:</strong> Members can interact with bot
     </div>
 
     <form id="botForm">
@@ -519,105 +676,4 @@ h3 {
             <input type="file" id="fileUpload" class="file-upload-input" accept=".txt" onchange="handleFileUpload(event)">
             <div id="fileName" class="file-name"></div>
           </div>
-        </div>
-
-        <div class="input-group full-width">
-          <label>👤 Mention New Member's Username?</label>
-          <select name="use_custom_name">
-            <option value="yes">✅ Yes - Add @username in welcome messages</option>
-            <option value="no">❌ No - Send messages without @username</option>
-          </select>
-          <div class="label-subtitle">
-            "Yes" करोगे तो message होगा: "@john_doe Welcome to our group!"<br>
-            "No" करोगे तो message होगा: "Welcome to our group!"
-          </div>
-        </div>
-
-        <div class="input-group full-width">
-          <label>👥 Group Chat IDs (comma separated)</label>
-          <input type="text" name="group_ids" placeholder="e.g. 24632887389663044, 123456789">
-        </div>
-
-        <div class="input-group">
-          <label>⏱️ Delay Between Welcome Messages (seconds)</label>
-          <input type="number" name="delay" value="3" min="1">
-          <div class="label-subtitle">हर welcome message के बीच का gap (2-5 seconds recommended)</div>
-        </div>
-
-        <div class="input-group">
-          <label>🔄 Check for New Members Every (seconds)</label>
-          <input type="number" name="poll" value="10" min="5">
-          <div class="label-subtitle">कितनी देर बाद group check करे (10-30 seconds recommended)</div>
-        </div>
-      </div>
-
-      <div class="buttons">
-        <button type="button" class="start" onclick="startBot()">▶️ Start Auto Welcome Bot</button>
-        <button type="button" class="stop" onclick="stopBot()">⏹️ Stop Bot</button>
-        <button type="button" class="sample" onclick="downloadSample()">📥 Download Sample TXT</button>
-      </div>
-    </form>
-
-    <div class="log-section">
-      <h3>📋 Live Activity Logs</h3>
-      <div class="log-box" id="logs">No activity yet. Start the bot to monitor for new members...</div>
-    </div>
-  </div>
-
-<script>
-function handleFileUpload(event) {
-  const file = event.target.files[0];
-  if (file) {
-    const reader = new FileReader();
-    reader.onload = function(e) {
-      const content = e.target.result;
-      document.getElementById('welcomeArea').value = content;
-      document.getElementById('fileName').textContent = '✅ Loaded: ' + file.name;
-    };
-    reader.readAsText(file);
-  }
-}
-
-async function startBot(){
-  let form = new FormData(document.getElementById('botForm'));
-  let res = await fetch('/start', {method:'POST', body: form});
-  let data = await res.json();
-  alert(data.message);
-}
-
-async function stopBot(){
-  let res = await fetch('/stop', {method:'POST'});
-  let data = await res.json();
-  alert(data.message);
-}
-
-async function fetchLogs(){
-  let res = await fetch('/logs');
-  let data = await res.json();
-  let box = document.getElementById('logs');
-  if(data.logs.length === 0) box.innerHTML = "No activity yet. Start the bot to monitor for new members...";
-  else box.innerHTML = data.logs.join('<br>');
-  box.scrollTop = box.scrollHeight;
-}
-setInterval(fetchLogs, 2000);
-
-function downloadSample(){
-  const text = "Welcome to our amazing group!\
-Glad to have you here!\
-Feel free to introduce yourself!\
-Enjoy chatting with us!\
-Don't hesitate to ask questions!";
-  const blob = new Blob([text], {type: 'text/plain'});
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = 'welcome_messages.txt';
-  link.click();
-}
-</script>
-</body>
-</html>
-"""
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    
