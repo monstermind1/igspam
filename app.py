@@ -18,7 +18,7 @@ def log(msg):
     print(msg)
 
 
-def run_bot(username, password, welcome_messages, group_ids, delay, poll_interval, custom_name):
+def run_bot(username, password, welcome_messages, group_ids, delay, poll_interval, use_custom_name):
     cl = Client()
     try:
         if os.path.exists(SESSION_FILE):
@@ -34,48 +34,78 @@ def run_bot(username, password, welcome_messages, group_ids, delay, poll_interva
         log(f"⚠️ Login failed: {e}")
         return
 
-    log("🤖 Bot started — Sending welcome messages 24x7...")
-    message_count = 0
+    log("🤖 Bot started — Monitoring for NEW members...")
+    
+    # Track existing members initially
+    known_members = {}
+    for gid in group_ids:
+        try:
+            group = cl.direct_thread(gid)
+            known_members[gid] = {user.pk for user in group.users}
+            log(f"📊 Tracking {len(known_members[gid])} existing members in group {gid}")
+        except Exception as e:
+            log(f"⚠️ Error loading group {gid}: {e}")
+            known_members[gid] = set()
+
+    welcome_count = 0
 
     while not STOP_EVENT.is_set():
         try:
             for gid in group_ids:
-                if STOP_EVENT.is_set():  # Check before each group
+                if STOP_EVENT.is_set():
                     break
                     
                 try:
-                    # Send ALL welcome messages continuously
-                    for msg in welcome_messages:
-                        if STOP_EVENT.is_set():  # Check before each message
-                            break
-                            
-                        # Add custom name/username to message
-                        if custom_name:
-                            final_msg = f"{custom_name} {msg}"
-                        else:
-                            final_msg = msg
-                        
-                        cl.direct_send(final_msg, thread_ids=[gid])
-                        message_count += 1
-                        log(f"✅ [{message_count}] Sent: '{final_msg}' to group {gid}")
-                        
-                        # Check stop during delay
-                        for _ in range(delay):
-                            if STOP_EVENT.is_set():
-                                break
-                            time.sleep(1)
-                        
-                        if STOP_EVENT.is_set():
-                            break
-                            
+                    group = cl.direct_thread(gid)
+                    current_members = {user.pk for user in group.users}
+                    
+                    # Find NEW members (not in known_members)
+                    new_members = current_members - known_members[gid]
+                    
+                    if new_members:
+                        for user in group.users:
+                            if user.pk in new_members and user.username != username:
+                                if STOP_EVENT.is_set():
+                                    break
+                                
+                                # Send welcome messages to NEW member
+                                for msg in welcome_messages:
+                                    if STOP_EVENT.is_set():
+                                        break
+                                    
+                                    # Add user's name/username if enabled
+                                    if use_custom_name:
+                                        final_msg = f"@{user.username} {msg}"
+                                    else:
+                                        final_msg = msg
+                                    
+                                    cl.direct_send(final_msg, thread_ids=[gid])
+                                    welcome_count += 1
+                                    log(f"🎉 [{welcome_count}] Welcomed NEW member @{user.username} (Name: {user.full_name}) in group {gid}")
+                                    log(f"   📤 Sent: '{final_msg}'")
+                                    
+                                    # Delay between messages
+                                    for _ in range(delay):
+                                        if STOP_EVENT.is_set():
+                                            break
+                                        time.sleep(1)
+                                    
+                                    if STOP_EVENT.is_set():
+                                        break
+                                
+                                # Add to known members after welcoming
+                                known_members[gid].add(user.pk)
+                    
+                    # Update known members
+                    known_members[gid] = current_members
+                    
                 except Exception as e:
-                    log(f"⚠️ Error in group {gid}: {e}")
+                    log(f"⚠️ Error checking group {gid}: {e}")
             
             if STOP_EVENT.is_set():
                 break
             
-            # Poll interval between message cycles with stop check
-            log(f"⏸️ Waiting {poll_interval} seconds before next message cycle...")
+            # Wait before checking again
             for _ in range(poll_interval):
                 if STOP_EVENT.is_set():
                     break
@@ -84,7 +114,7 @@ def run_bot(username, password, welcome_messages, group_ids, delay, poll_interva
         except Exception as e:
             log(f"⚠️ Loop error: {e}")
 
-    log(f"🛑 Bot stopped successfully. Total messages sent: {message_count}")
+    log(f"🛑 Bot stopped. Total new members welcomed: {welcome_count}")
 
 
 @app.route("/")
@@ -105,16 +135,16 @@ def start_bot():
     group_ids = [g.strip() for g in request.form.get("group_ids", "").split(",") if g.strip()]
     delay = int(request.form.get("delay", 3))
     poll = int(request.form.get("poll", 10))
-    custom_name = request.form.get("custom_name", "").strip()
+    use_custom_name = request.form.get("use_custom_name") == "yes"
 
     if not username or not password or not group_ids or not welcome:
         return jsonify({"message": "⚠️ Please fill all required fields."})
 
     STOP_EVENT.clear()
-    BOT_THREAD = threading.Thread(target=run_bot, args=(username, password, welcome, group_ids, delay, poll, custom_name), daemon=True)
+    BOT_THREAD = threading.Thread(target=run_bot, args=(username, password, welcome, group_ids, delay, poll, use_custom_name), daemon=True)
     BOT_THREAD.start()
     log("🚀 Bot thread started.")
-    return jsonify({"message": "✅ Bot started successfully! Messages sending 24x7..."})
+    return jsonify({"message": "✅ Bot started! Monitoring for new members..."})
 
 
 @app.route("/stop", methods=["POST"])
@@ -123,7 +153,6 @@ def stop_bot():
     STOP_EVENT.set()
     log("🛑 Stop signal sent. Stopping bot...")
     
-    # Wait for thread to finish (max 5 seconds)
     if BOT_THREAD:
         BOT_THREAD.join(timeout=5)
     
@@ -142,7 +171,7 @@ PAGE_HTML = """
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>INSTA 24x7 GC SPAM SERVER</title>
+<title>INSTA AUTO WELCOME BOT</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
 
@@ -392,17 +421,6 @@ h3 {
   color: #00eaff;
 }
 
-.highlight-box {
-  background: rgba(255,165,0,0.1);
-  border: 2px solid rgba(255,165,0,0.4);
-  border-radius: 15px;
-  padding: 15px;
-  margin-top: 10px;
-  color: #ffa500;
-  font-size: 14px;
-  line-height: 1.8;
-}
-
 .special-box {
   background: rgba(255,0,255,0.1);
   border: 2px solid rgba(255,0,255,0.4);
@@ -456,23 +474,23 @@ h3 {
 </head>
 <body>
   <div class="container">
-    <h1>✴️INSTA 24x7 SPAM SERVER</h1>
+    <h1>🤖 INSTA AUTO WELCOME BOT 🤖</h1>
     
     <div class="special-box">
-      <strong>🎯 24x7 CONTINUOUS SPAM MODE 🎯</strong><br>
-      ⚡ Bot will send messages NON-STOP 24x7<br>
-      ⚡ Messages will repeat continuously with your custom name/username<br>
-      ⚡ Perfect for continuous group promotion and engagement<br>
-      ⚡ <strong>STOP button now works instantly! 🛑</strong>
+      <strong>🎯 AUTOMATIC NEW MEMBER DETECTION 🎯</strong><br>
+      ✅ Bot silently monitors groups for NEW members<br>
+      ✅ When someone joins → Instant automatic welcome!<br>
+      ✅ Only NEW members get welcomed (existing members ignored)<br>
+      ✅ Bot stays silent until a new member joins
     </div>
 
     <div class="info-box">
-      <strong>✨ FEATURES:</strong><br>
-      • 📤 <strong>Multiple Messages:</strong> All messages sent continuously<br>
-      • 👤 <strong>Custom Name/Username:</strong> Use any name or @username you want<br>
-      • 📁 <strong>TXT File Upload:</strong> Upload spam messages from a text file<br>
-      • ⏰ <strong>24x7 Mode:</strong> Messages keep sending with delay control<br>
-      • 🛑 <strong>Instant Stop:</strong> Bot stops immediately when you click stop
+      <strong>✨ HOW IT WORKS:</strong><br>
+      • 🔍 <strong>Smart Monitoring:</strong> Bot tracks all group members<br>
+      • 🆕 <strong>Detects New Joins:</strong> Instantly identifies when someone new joins<br>
+      • 🎉 <strong>Auto Welcome:</strong> Sends welcome messages only to NEW members<br>
+      • 😴 <strong>Silent Mode:</strong> No spam - only welcomes actual new joiners<br>
+      • 📁 <strong>TXT File Support:</strong> Upload multiple welcome messages
     </div>
 
     <form id="botForm">
@@ -488,7 +506,7 @@ h3 {
         </div>
 
         <div class="input-group full-width">
-          <label>💬 spam Messages (each line = 1 message) - Sent 24x7</label>
+          <label>💬 Welcome Messages (each line = 1 message)</label>
           <textarea id="welcomeArea" name="welcome" placeholder="Enter multiple welcome messages here&#10;Line 1: Welcome to our group!&#10;Line 2: Glad you're here!&#10;Line 3: Feel free to introduce yourself!"></textarea>
         </div>
 
@@ -496,7 +514,7 @@ h3 {
           <label>📁 Or Upload TXT File (Optional)</label>
           <div class="file-upload-wrapper">
             <label for="fileUpload" class="file-upload-label">
-              📂 Click to Upload spam Messages File
+              📂 Click to Upload Welcome Messages File
             </label>
             <input type="file" id="fileUpload" class="file-upload-input" accept=".txt" onchange="handleFileUpload(event)">
             <div id="fileName" class="file-name"></div>
@@ -504,17 +522,14 @@ h3 {
         </div>
 
         <div class="input-group full-width">
-          <label>
-            👤 Custom Name or Username (कोई भी NAME या @USERNAME डालो)
-            <div class="label-subtitle">यहाँ जो भी लिखोगे वो हर message में दिखेगा (खाली छोड़ सकते हो)</div>
-          </label>
-          <input type="text" name="custom_name" placeholder="e.g. @promo_king या Rahul Kumar (optional)">
-          <div class="highlight-box">
-            💡 <strong>Examples:</strong><br>
-            • अगर डालोगे: <strong>@promo_king</strong> → Message: <strong>"@promo_king message to our group!"</strong><br>
-            • अगर डालोगे: <strong>Rahul Kumar</strong> → Message: <strong>"Rahul Kumar Welcome to our group!"</strong><br>
-            • अगर खाली छोड़ोगे → Message: <strong>"message sent to our group!"</strong> (without name)<br><br>
-            <strong>🔥 24x7 Mode:</strong> यह message बार-बार repeat होगा जब तक bot को stop नहीं करोगे!
+          <label>👤 Mention New Member's Username?</label>
+          <select name="use_custom_name">
+            <option value="yes">✅ Yes - Add @username in welcome messages</option>
+            <option value="no">❌ No - Send messages without @username</option>
+          </select>
+          <div class="label-subtitle">
+            "Yes" करोगे तो message होगा: "@john_doe Welcome to our group!"<br>
+            "No" करोगे तो message होगा: "Welcome to our group!"
           </div>
         </div>
 
@@ -524,28 +539,28 @@ h3 {
         </div>
 
         <div class="input-group">
-          <label>⏱️ Delay Between Messages (seconds)</label>
-          <input type="number" name="delay" value="5" min="1">
-          <div class="label-subtitle">हर message के बीच का gap (3-10 seconds recommended)</div>
+          <label>⏱️ Delay Between Welcome Messages (seconds)</label>
+          <input type="number" name="delay" value="3" min="1">
+          <div class="label-subtitle">हर welcome message के बीच का gap (2-5 seconds recommended)</div>
         </div>
 
         <div class="input-group">
-          <label>🔄 Delay Between Cycles (seconds)</label>
-          <input type="number" name="poll" value="30" min="10">
-          <div class="label-subtitle">सभी messages भेजने के बाद कितनी देर wait करे (30-60 seconds recommended for 24x7)</div>
+          <label>🔄 Check for New Members Every (seconds)</label>
+          <input type="number" name="poll" value="10" min="5">
+          <div class="label-subtitle">कितनी देर बाद group check करे (10-30 seconds recommended)</div>
         </div>
       </div>
 
       <div class="buttons">
-        <button type="button" class="start" onclick="startBot()">▶️ Start 24x7 Bot</button>
+        <button type="button" class="start" onclick="startBot()">▶️ Start Auto Welcome Bot</button>
         <button type="button" class="stop" onclick="stopBot()">⏹️ Stop Bot</button>
         <button type="button" class="sample" onclick="downloadSample()">📥 Download Sample TXT</button>
       </div>
     </form>
 
     <div class="log-section">
-      <h3>📋 Live Logs (24x7 Messages)</h3>
-      <div class="log-box" id="logs">No logs yet. Start the bot to see 24x7 activity...</div>
+      <h3>📋 Live Activity Logs</h3>
+      <div class="log-box" id="logs">No activity yet. Start the bot to monitor for new members...</div>
     </div>
   </div>
 
@@ -580,7 +595,7 @@ async function fetchLogs(){
   let res = await fetch('/logs');
   let data = await res.json();
   let box = document.getElementById('logs');
-  if(data.logs.length === 0) box.innerHTML = "No logs yet. Start the bot to see 24x7 activity...";
+  if(data.logs.length === 0) box.innerHTML = "No activity yet. Start the bot to monitor for new members...";
   else box.innerHTML = data.logs.join('<br>');
   box.scrollTop = box.scrollHeight;
 }
@@ -588,10 +603,10 @@ setInterval(fetchLogs, 2000);
 
 function downloadSample(){
   const text = "Welcome to our amazing group!\
-Join us for daily updates!\
-Don't miss out on exclusive content!\
-Be part of our growing community!\
-Stay connected with us 24x7!";
+Glad to have you here!\
+Feel free to introduce yourself!\
+Enjoy chatting with us!\
+Don't hesitate to ask questions!";
   const blob = new Blob([text], {type: 'text/plain'});
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
@@ -606,4 +621,3 @@ Stay connected with us 24x7!";
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-        
