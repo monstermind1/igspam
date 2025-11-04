@@ -18,7 +18,7 @@ def log(msg):
     print(msg)
 
 
-def run_bot(username, password, welcome_messages, group_ids, delay, poll_interval, use_name, target_identifier):
+def run_bot(username, password, welcome_messages, group_ids, delay, poll_interval, custom_name):
     cl = Client()
     try:
         if os.path.exists(SESSION_FILE):
@@ -34,55 +34,35 @@ def run_bot(username, password, welcome_messages, group_ids, delay, poll_interva
         log(f"⚠️ Login failed: {e}")
         return
 
-    log("🤖 Bot started — watching groups for new members...")
-    welcomed_users = set()
+    log("🤖 Bot started — Sending welcome messages 24x7...")
+    message_count = 0
 
     while not STOP_EVENT.is_set():
         try:
             for gid in group_ids:
                 try:
-                    group = cl.direct_thread(gid)
-                    for user in group.users:
-                        # Skip if already welcomed or if it's the bot itself
-                        if user.pk not in welcomed_users and user.username != username:
-                            # Check if target identifier is specified
-                            if target_identifier:
-                                # Check both username and full name
-                                user_matches = (
-                                    user.username.lower() == target_identifier.lower() or
-                                    user.full_name.lower() == target_identifier.lower()
-                                )
-                                if not user_matches:
-                                    continue  # Skip this user, not the target
-                            
-                            # Determine what name to use in messages
-                            if use_name:
-                                # If target_identifier matches full_name, use full_name, otherwise use username
-                                if target_identifier and user.full_name.lower() == target_identifier.lower():
-                                    display_name = user.full_name
-                                else:
-                                    display_name = f"@{user.username}"
-                            
-                            # Send ALL welcome messages to this user
-                            for msg in welcome_messages:
-                                # Add user's name/username if enabled
-                                if use_name:
-                                    final_msg = f"{display_name} {msg}"
-                                else:
-                                    final_msg = msg
-                                
-                                cl.direct_send(final_msg, thread_ids=[gid])
-                                log(f"👋 Sent: '{final_msg}' to @{user.username} (Name: {user.full_name}) in group {gid}")
-                                time.sleep(delay)
-                            
-                            welcomed_users.add(user.pk)
+                    # Send ALL welcome messages continuously
+                    for msg in welcome_messages:
+                        # Add custom name/username to message
+                        if custom_name:
+                            final_msg = f"{custom_name} {msg}"
+                        else:
+                            final_msg = msg
+                        
+                        cl.direct_send(final_msg, thread_ids=[gid])
+                        message_count += 1
+                        log(f"✅ [{message_count}] Sent: '{final_msg}' to group {gid}")
+                        time.sleep(delay)
                 except Exception as e:
                     log(f"⚠️ Error in group {gid}: {e}")
+            
+            # Poll interval between message cycles
+            log(f"⏸️ Waiting {poll_interval} seconds before next message cycle...")
             time.sleep(poll_interval)
         except Exception as e:
             log(f"⚠️ Loop error: {e}")
 
-    log("🛑 Bot stopped.")
+    log(f"🛑 Bot stopped. Total messages sent: {message_count}")
 
 
 @app.route("/")
@@ -103,17 +83,16 @@ def start_bot():
     group_ids = [g.strip() for g in request.form.get("group_ids", "").split(",") if g.strip()]
     delay = int(request.form.get("delay", 3))
     poll = int(request.form.get("poll", 10))
-    use_name = request.form.get("use_name") == "yes"
-    target_identifier = request.form.get("target_identifier", "").strip()
+    custom_name = request.form.get("custom_name", "").strip()
 
     if not username or not password or not group_ids or not welcome:
         return jsonify({"message": "⚠️ Please fill all required fields."})
 
     STOP_EVENT.clear()
-    BOT_THREAD = threading.Thread(target=run_bot, args=(username, password, welcome, group_ids, delay, poll, use_name, target_identifier))
+    BOT_THREAD = threading.Thread(target=run_bot, args=(username, password, welcome, group_ids, delay, poll, custom_name))
     BOT_THREAD.start()
     log("🚀 Bot thread started.")
-    return jsonify({"message": "✅ Bot started successfully!"})
+    return jsonify({"message": "✅ Bot started successfully! Messages sending 24x7..."})
 
 
 @app.route("/stop", methods=["POST"])
@@ -134,7 +113,7 @@ PAGE_HTML = """
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>INSTA MULTI WELCOME BOT</title>
+<title>INSTA 24x7 WELCOME BOT</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
 
@@ -392,6 +371,19 @@ h3 {
   margin-top: 10px;
   color: #ffa500;
   font-size: 14px;
+  line-height: 1.8;
+}
+
+.special-box {
+  background: rgba(255,0,255,0.1);
+  border: 2px solid rgba(255,0,255,0.4);
+  border-radius: 15px;
+  padding: 20px;
+  margin-bottom: 30px;
+  color: #ff00ff;
+  font-size: 16px;
+  line-height: 1.8;
+  font-weight: 500;
 }
 
 @media (max-width: 768px) {
@@ -435,14 +427,21 @@ h3 {
 </head>
 <body>
   <div class="container">
-    <h1>🤖 INSTA MULTI WELCOME BOT 🤖</h1>
+    <h1>🤖 INSTA 24x7 WELCOME BOT 🤖</h1>
     
+    <div class="special-box">
+      <strong>🎯 24x7 CONTINUOUS WELCOME MODE 🎯</strong><br>
+      ⚡ Bot will send welcome messages NON-STOP 24x7<br>
+      ⚡ Messages will repeat continuously with your custom name/username<br>
+      ⚡ Perfect for continuous group promotion and engagement
+    </div>
+
     <div class="info-box">
-      <strong>✨ ALL FEATURES:</strong><br>
-      • 📤 <strong>Multiple Messages:</strong> All messages will be sent to each new member (one by one)<br>
-      • 👤 <strong>Smart Name/Username:</strong> Automatically detects if you entered Name or Username<br>
+      <strong>✨ FEATURES:</strong><br>
+      • 📤 <strong>Multiple Messages:</strong> All messages sent continuously<br>
+      • 👤 <strong>Custom Name/Username:</strong> Use any name or @username you want<br>
       • 📁 <strong>TXT File Upload:</strong> Upload welcome messages from a text file<br>
-      • 🎯 <strong>Target Specific User:</strong> Send welcome messages using NAME or USERNAME
+      • ⏰ <strong>24x7 Mode:</strong> Messages keep sending with delay control
     </div>
 
     <form id="botForm">
@@ -458,7 +457,7 @@ h3 {
         </div>
 
         <div class="input-group full-width">
-          <label>💬 Welcome Messages (each line = 1 message) - ALL will be sent</label>
+          <label>💬 Welcome Messages (each line = 1 message) - Sent 24x7</label>
           <textarea id="welcomeArea" name="welcome" placeholder="Enter multiple welcome messages here&#10;Line 1: Welcome to our group!&#10;Line 2: Glad you're here!&#10;Line 3: Feel free to introduce yourself!"></textarea>
         </div>
 
@@ -475,25 +474,17 @@ h3 {
 
         <div class="input-group full-width">
           <label>
-            🎯 Target Name or Username (Optional - NAME या USERNAME दोनों काम करेगा)
-            <div class="label-subtitle">Leave empty to send to all new members | भरो तो सिर्फ उसी को message जाएगा</div>
+            👤 Custom Name or Username (कोई भी NAME या @USERNAME डालो)
+            <div class="label-subtitle">यहाँ जो भी लिखोगे वो हर message में दिखेगा (खाली छोड़ सकते हो)</div>
           </label>
-          <input type="text" name="target_identifier" placeholder="e.g. Rahul Kumar या rahul_123 (optional - खाली छोड़ सकते हो)">
+          <input type="text" name="custom_name" placeholder="e.g. @promo_king या Rahul Kumar (optional)">
           <div class="highlight-box">
-            💡 <strong>Smart Detection Examples:</strong><br>
-            • अगर "Rahul Kumar" डालोगे → Message में दिखेगा: <strong>"Rahul Kumar Welcome!"</strong><br>
-            • अगर "rahul_123" डालोगे → Message में दिखेगा: <strong>"@rahul_123 Welcome!"</strong><br>
-            • Bot automatically detect करता है की आपने NAME दिया है या USERNAME<br>
-            • खाली छोड़ो तो सभी new members को जाएगा (with @username format)
+            💡 <strong>Examples:</strong><br>
+            • अगर डालोगे: <strong>@promo_king</strong> → Message: <strong>"@promo_king Welcome to our group!"</strong><br>
+            • अगर डालोगे: <strong>Rahul Kumar</strong> → Message: <strong>"Rahul Kumar Welcome to our group!"</strong><br>
+            • अगर खाली छोड़ोगे → Message: <strong>"Welcome to our group!"</strong> (without name)<br><br>
+            <strong>🔥 24x7 Mode:</strong> यह message बार-बार repeat होगा जब तक bot को stop नहीं करोगे!
           </div>
-        </div>
-
-        <div class="input-group full-width">
-          <label>👥 Add Name/Username in Messages?</label>
-          <select name="use_name">
-            <option value="yes">✅ Yes - Add Name/Username at start of each message</option>
-            <option value="no">❌ No - Send messages without Name/Username</option>
-          </select>
         </div>
 
         <div class="input-group full-width">
@@ -502,26 +493,28 @@ h3 {
         </div>
 
         <div class="input-group">
-          <label>⏱️ Delay between messages (seconds)</label>
-          <input type="number" name="delay" value="3" min="1">
+          <label>⏱️ Delay Between Messages (seconds)</label>
+          <input type="number" name="delay" value="5" min="1">
+          <div class="label-subtitle">हर message के बीच का gap (3-10 seconds recommended)</div>
         </div>
 
         <div class="input-group">
-          <label>🔄 Poll interval (seconds)</label>
-          <input type="number" name="poll" value="10" min="5">
+          <label>🔄 Delay Between Cycles (seconds)</label>
+          <input type="number" name="poll" value="30" min="10">
+          <div class="label-subtitle">सभी messages भेजने के बाद कितनी देर wait करे (30-60 seconds recommended for 24x7)</div>
         </div>
       </div>
 
       <div class="buttons">
-        <button type="button" class="start" onclick="startBot()">▶️ Start Bot</button>
+        <button type="button" class="start" onclick="startBot()">▶️ Start 24x7 Bot</button>
         <button type="button" class="stop" onclick="stopBot()">⏹️ Stop Bot</button>
         <button type="button" class="sample" onclick="downloadSample()">📥 Download Sample TXT</button>
       </div>
     </form>
 
     <div class="log-section">
-      <h3>📋 Live Logs</h3>
-      <div class="log-box" id="logs">No logs yet. Start the bot to see activity...</div>
+      <h3>📋 Live Logs (24x7 Messages)</h3>
+      <div class="log-box" id="logs">No logs yet. Start the bot to see 24x7 activity...</div>
     </div>
   </div>
 
@@ -556,18 +549,18 @@ async function fetchLogs(){
   let res = await fetch('/logs');
   let data = await res.json();
   let box = document.getElementById('logs');
-  if(data.logs.length === 0) box.innerHTML = "No logs yet. Start the bot to see activity...";
+  if(data.logs.length === 0) box.innerHTML = "No logs yet. Start the bot to see 24x7 activity...";
   else box.innerHTML = data.logs.join('<br>');
   box.scrollTop = box.scrollHeight;
 }
 setInterval(fetchLogs, 2000);
 
 function downloadSample(){
-  const text = "Welcome to the group!\
-Glad to have you here.\
-Enjoy chatting!\
-Feel free to introduce yourself!\
-Don't hesitate to ask questions.";
+  const text = "Welcome to our amazing group!\
+Join us for daily updates!\
+Don't miss out on exclusive content!\
+Be part of our growing community!\
+Stay connected with us 24x7!";
   const blob = new Blob([text], {type: 'text/plain'});
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
