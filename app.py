@@ -83,11 +83,10 @@ def process_commands(cl, group, gid, message, sender_username, is_admin):
         log(f"📝 Help sent to @{sender_username}")
         
     elif text in ["/stats", ".stats"]:
-        cl.direct_send(f"📊 STATS:
+    cl.direct_send(f"""📊 STATS:
 Total: {STATS['total_welcomed']}
-Today: {STATS['today_welcomed']}", thread_ids=[gid])
-        log(f"📈 Stats sent to @{sender_username}")
-        
+Today: {STATS['today_welcomed']}""", thread_ids=[gid])
+    log(f"📈 Stats sent to @{sender_username}")
     elif text in ["/count", ".count"]:
         cl.direct_send(f"👥 MEMBERS: {len(group.users)}", thread_ids=[gid])
         log(f"👥 Count sent to @{sender_username}")
