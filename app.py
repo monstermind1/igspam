@@ -102,8 +102,7 @@ def start_bot():
             token = f.read().strip()
         
         group_ids = [g.strip() for g in request.form.get('group_ids', '').split(',') if g.strip()]
-        welcome_msgs = [m.strip() for m in request.form.get('welcome', '').split('
-') if m.strip()]
+        welcome_msgs = [m.strip() for m in request.form.get('welcome', '').split('') if m.strip()]
         
         if not group_ids or len(group_ids) == 0:
             return jsonify({'success': False, 'message': '❌ Enter Group IDs (comma separated)'})
