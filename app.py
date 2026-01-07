@@ -18,7 +18,6 @@ STATS = {"total_welcomed": 0, "today_welcomed": 0, "last_reset": datetime.now().
 BOT_CONFIG = {"auto_replies": {}, "auto_reply_active": False}
 
 GROUP_CHAT_ID = None
-ADMIN_USER_ID = None
 
 def log(msg):
     ts = datetime.now().strftime('%H:%M:%S')
@@ -28,7 +27,6 @@ def log(msg):
 
 MUSIC_EMOJIS = ["🎵", "🎶", "🎤", "🎸", "🥁", "🎹", "🎺", "🎷", "🥰", "❤️"]
 LOVE_EMOJIS = ["❤️", "💕", "💖", "💗", "💓", "💞", "💘", "💝"]
-STAR_EMOJIS = ["⭐", "✨", "🌟", "💫", "⭐️"]
 
 cl = Client()
 SESSION_LOADED = False
@@ -59,20 +57,19 @@ def load_session():
         return False
 
 def load_group_config():
-    global GROUP_CHAT_ID, ADMIN_USER_ID
+    global GROUP_CHAT_ID
     try:
         if os.path.exists(GROUP_CONFIG_FILE):
             with open(GROUP_CONFIG_FILE, 'r') as f:
                 config = json.load(f)
                 GROUP_CHAT_ID = config.get('group_chat_id')
-                ADMIN_USER_ID = config.get('admin_user_id')
                 log(f"✅ Group config: {GROUP_CHAT_ID}")
     except:
         pass
 
 def save_group_config():
     try:
-        config = {'group_chat_id': GROUP_CHAT_ID, 'admin_user_id': ADMIN_USER_ID}
+        config = {'group_chat_id': GROUP_CHAT_ID}
         with open(GROUP_CONFIG_FILE, 'w') as f:
             json.dump(config, f)
     except:
@@ -129,23 +126,23 @@ def bot_loop():
                         # ALL COMMANDS WORK FOR ANYONE
                         if msg_text.startswith('/'):
                             if "/start" in msg_text or "/help" in msg_text:
-                                help_msg = f"""🤖 Bot Active! 
+                                help_msg = "🤖 Bot Active!
 
 👑 COMMANDS:
 /start /help - Show this help
-/stats - Statistics  
+/stats - Statistics
 /reply hello Namaste - Add auto reply
 /stop - Pause bot
 
-💬 Auto replies active for: {len(BOT_CONFIG["auto_replies"])} triggers
-📊 Today: {STATS['today_welcomed']}/50 messages"""
+💬 Auto replies: " + str(len(BOT_CONFIG["auto_replies"])) + " triggers
+📊 Today: " + str(STATS['today_welcomed']) + "/50"
                                 cl.direct_send(help_msg, thread_id=GROUP_CHAT_ID)
                                 log("✅ Help command executed")
                                 
                             elif "/stats" in msg_text:
-                                stats_msg = f"📊 Stats:
-Total: {STATS['total_welcomed']}
-Today: {STATS['today_welcomed']}/50"
+                                stats_msg = "📊 Stats:
+Total: " + str(STATS['total_welcomed']) + "
+Today: " + str(STATS['today_welcomed']) + "/50"
                                 cl.direct_send(stats_msg, thread_id=GROUP_CHAT_ID)
                                 log("✅ Stats command")
                                 
@@ -173,7 +170,7 @@ Today: {STATS['today_welcomed']}/50"
                             for trigger, reply in BOT_CONFIG["auto_replies"].items():
                                 if trigger in msg_text:
                                     emoji = random.choice(LOVE_EMOJIS + MUSIC_EMOJIS)
-                                    cl.direct_send(f"{reply} {emoji}", thread_id=GROUP_CHAT_ID)
+                                    cl.direct_send(reply + " " + emoji, thread_id=GROUP_CHAT_ID)
                                     STATS["total_welcomed"] += 1
                                     STATS["today_welcomed"] += 1
                                     save_stats()
@@ -216,7 +213,7 @@ def disconnect_instagram():
     except:
         pass
 
-# DASHBOARD HTML (Fixed)
+# DASHBOARD HTML
 DASHBOARD_HTML = """
 <!DOCTYPE html>
 <html>
@@ -236,33 +233,28 @@ DASHBOARD_HTML = """
         .glass-card { background: rgba(255,255,255,0.1); backdrop-filter: blur(20px); border-radius:25px; padding:30px; margin:20px 0; border: 1px solid rgba(255,255,255,0.2); box-shadow: 0 25px 50px rgba(0,0,0,0.2); transition: all 0.4s ease; }
         .glass-card:hover { transform: translateY(-10px); box-shadow: 0 35px 70px rgba(0,0,0,0.3); }
         .stats-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(280px,1fr)); gap:25px; margin:25px 0; }
-        .stat-card { background: linear-gradient(145deg, rgba(255,255,255,0.15), rgba(255,255,255,0.05)); padding:30px; border-radius:20px; text-align:center; border: 1px solid rgba(255,255,255,0.1); position: relative; overflow: hidden; }
+        .stat-card { background: linear-gradient(145deg, rgba(255,255,255,0.15), rgba(255,255,255,0.05)); padding:30px; border-radius:20px; text-align:center; border: 1px solid rgba(255,255,255,0.1); }
         .stat-number { font-size:3.5em; font-weight:700; background: linear-gradient(45deg, #fff, #e0e0ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom:10px; }
         .stat-label { font-size:1.1em; opacity:0.9; font-weight:500; }
-        .btn { padding:15px 35px; border:none; border-radius:50px; cursor:pointer; font-weight:600; font-size:16px; transition:all 0.3s; margin:8px; text-transform: uppercase; letter-spacing:1px; position: relative; overflow: hidden; }
+        .btn { padding:15px 35px; border:none; border-radius:50px; cursor:pointer; font-weight:600; font-size:16px; transition:all 0.3s; margin:8px; text-transform: uppercase; letter-spacing:1px; }
         .btn-primary { background: linear-gradient(45deg, #667eea, #764ba2); color:white; box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4); }
         .btn-success { background: linear-gradient(45deg, #00d4aa, #00b894); color:white; box-shadow: 0 10px 30px rgba(0, 212, 170, 0.4); }
         .btn-danger { background: linear-gradient(45deg, #ff6b6b, #ee5a52); color:white; box-shadow: 0 10px 30px rgba(255, 107, 107, 0.4); }
         .btn:hover { transform: translateY(-5px) scale(1.05); box-shadow: 0 20px 40px rgba(0,0,0,0.3); }
-        .logs { max-height:450px; overflow-y:auto; background:rgba(0,0,0,0.3); border-radius:20px; padding:25px; font-family: 'Fira Code', monospace; font-size:13px; line-height:1.6; border: 1px solid rgba(255,255,255,0.1); }
+        .logs { max-height:450px; overflow-y:auto; background:rgba(0,0,0,0.3); border-radius:20px; padding:25px; font-family: monospace; font-size:13px; line-height:1.6; border: 1px solid rgba(255,255,255,0.1); }
         .form-group { margin:25px 0; }
         .form-group label { display:block; margin-bottom:12px; font-weight:600; color:#fff; font-size:1.1em; }
-        .form-group input { width:100%; padding:18px; border:2px solid rgba(255,255,255,0.2); border-radius:15px; font-size:15px; background:rgba(255,255,255,0.1); color:#fff; backdrop-filter: blur(10px); transition:all 0.3s; font-family: 'Fira Code', monospace; }
-        .form-group input::placeholder { color: rgba(255,255,255,0.6); }
-        .form-group input:focus { outline:none; border-color:#667eea; box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2); background:rgba(255,255,255,0.15); }
-        .status { padding:15px; border-radius:15px; margin:15px 0; font-weight:600; text-align:center; font-size:1em; }
+        .form-group input { width:100%; padding:18px; border:2px solid rgba(255,255,255,0.2); border-radius:15px; font-size:15px; background:rgba(255,255,255,0.1); color:#fff; }
+        .status { padding:15px; border-radius:15px; margin:15px 0; font-weight:600; text-align:center; }
         .status.online { background: rgba(0, 255, 127, 0.2); color:#00ff7f; border: 1px solid rgba(0, 255, 127, 0.3); }
         .status.offline { background: rgba(255, 107, 107, 0.2); color:#ff6b6b; border: 1px solid rgba(255, 107, 107, 0.3); }
-        .commands { background:rgba(0,212,170,0.2); padding:25px; border-radius:20px; margin-top:20px; border: 1px solid rgba(0,212,170,0.3); font-family: 'Fira Code', monospace; }
-        .commands strong { color:#00d4aa; font-size:1.2em; display:block; margin-bottom:15px; }
-        .commands code { background:rgba(0,0,0,0.5); padding:5px 10px; border-radius:8px; color:#00ff7f; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1><i class="fas fa-robot"></i> Instagram Group Bot</h1>
-            <p>Advanced Automation Dashboard <i class="fas fa-chart-line"></i></p>
+            <p>Premium Automation Dashboard</p>
         </div>
         
         <div class="glass-card">
@@ -289,44 +281,37 @@ DASHBOARD_HTML = """
         </div>
 
         <div class="glass-card">
-            <h3 style="color:#fff; margin-bottom:25px; font-size:1.5em;"><i class="fas fa-play-circle"></i> Bot Controls</h3>
-            <button class="btn btn-success" onclick="toggleBot({{ 'true' if bot_status else 'false' }})" style="font-size:18px;">
-                {% if bot_status %}<i class="fas fa-stop"></i> STOP BOT{% else %}<i class="fas fa-play"></i> START BOT{% endif %}
+            <h3 style="color:#fff; margin-bottom:25px; font-size:1.5em;">Bot Controls</h3>
+            <button class="btn btn-success" onclick="toggleBot({{ 'true' if bot_status else 'false' }})">
+                {% if bot_status %}STOP BOT{% else %}START BOT{% endif %}
             </button>
-            <button class="btn btn-danger" onclick="disconnect()" style="font-size:18px;"><i class="fas fa-unlink"></i> DISCONNECT</button>
+            <button class="btn btn-danger" onclick="disconnect()">DISCONNECT</button>
         </div>
 
         <div class="glass-card">
-            <h3 style="color:#fff; margin-bottom:25px; font-size:1.5em;"><i class="fas fa-key"></i> Token Setup</h3>
+            <h3 style="color:#fff; margin-bottom:25px; font-size:1.5em;">Token Setup</h3>
             <div class="form-group">
                 <label>Paste Instagram Session Token:</label>
                 <input type="text" id="tokenInput" placeholder="73946433692%3A86Qq7BtIBfGquT...">
-                <button class="btn btn-primary" onclick="setToken()" style="margin-top:15px;"><i class="fas fa-save"></i> Set Token</button>
+                <button class="btn btn-primary" onclick="setToken()" style="margin-top:15px;">Set Token</button>
             </div>
             <div id="tokenStatus" class="status offline">No token configured</div>
         </div>
 
         <div class="glass-card">
-            <h3 style="color:#fff; margin-bottom:25px; font-size:1.5em;"><i class="fas fa-users"></i> Group Setup</h3>
+            <h3 style="color:#fff; margin-bottom:25px; font-size:1.5em;">Group Setup</h3>
             <div class="form-group">
                 <label>Group Chat ID:</label>
                 <input type="text" id="groupChatId" value="{{ group_chat_id or '' }}" placeholder="2032530394271295">
             </div>
-            <button class="btn btn-success" onclick="setGroup()" style="margin-top:15px;"><i class="fas fa-save"></i> Save Group ID</button>
+            <button class="btn btn-success" onclick="setGroup()" style="margin-top:15px;">Save Group ID</button>
             <div id="groupStatus" class="status {% if group_chat_id %}online{% else %}offline{% endif %}">
-                {% if group_chat_id %}<i class="fas fa-check-circle"></i> Group Configured{% else %}No group configured{% endif %}
-            </div>
-            <div class="commands">
-                <strong><i class="fas fa-crown"></i> 🔥 ALL COMMANDS WORK FOR EVERYONE:</strong>
-                <br><code>/start or /help</code> - Show help + status
-                <br><code>/stats</code> - View statistics  
-                <br><code>/reply hello Namaste</code> - Add auto reply
-                <br><code>/stop</code> - Pause bot
+                {% if group_chat_id %}Group Configured{% else %}No group configured{% endif %}
             </div>
         </div>
 
         <div class="glass-card">
-            <h3 style="color:#fff; margin-bottom:25px; font-size:1.5em;"><i class="fas fa-terminal"></i> Live Logs</h3>
+            <h3 style="color:#fff; margin-bottom:25px; font-size:1.5em;">Live Logs</h3>
             <div class="logs" id="logsContainer">{{ logs_html|safe }}</div>
         </div>
     </div>
@@ -338,38 +323,38 @@ DASHBOARD_HTML = """
         }
 
         function disconnect() {
-            if(confirm('Disconnect Instagram session?')) {
+            if(confirm('Disconnect?')) {
                 fetch('/disconnect', {method: 'POST'}).then(() => location.reload());
             }
         }
 
         function setToken() {
             const token = document.getElementById('tokenInput').value.trim();
-            if (!token) return alert('❌ Enter token!');
+            if (!token) return alert('Enter token!');
             fetch('/set_token', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({token: token})
             }).then(r => r.json()).then(data => {
                 if (data.success) {
-                    document.getElementById('tokenStatus').innerHTML = '<i class="fas fa-check-circle"></i> Token Active';
+                    document.getElementById('tokenStatus').innerHTML = 'Token Active';
                     document.getElementById('tokenStatus').className = 'status online';
-                    alert('✅ Token set!');
-                } else alert('❌ ' + data.error);
+                    alert('Token set!');
+                } else alert('Error: ' + data.error);
             });
         }
 
         function setGroup() {
             const groupId = document.getElementById('groupChatId').value.trim();
-            if (!groupId) return alert('❌ Enter Group ID!');
+            if (!groupId) return alert('Enter Group ID!');
             fetch('/config/group', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({group_id: groupId})
             }).then(r => r.json()).then(() => {
-                document.getElementById('groupStatus').innerHTML = '<i class="fas fa-check-circle"></i> Group Configured';
+                document.getElementById('groupStatus').innerHTML = 'Group Configured';
                 document.getElementById('groupStatus').className = 'status online';
-                alert('✅ Group ID saved!');
+                alert('Group ID saved!');
             });
         }
 
