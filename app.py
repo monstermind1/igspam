@@ -5,372 +5,243 @@ import random
 from datetime import datetime
 from flask import Flask, render_template_string, request, jsonify
 from instagrapi import Client
-import json
 
 app = Flask(__name__)
 BOT_THREAD = None
 STOP_EVENT = threading.Event()
 LOGS = []
 SESSION_FILE = "session.json"
-SESSION_TOKEN = ""
 STATS = {"total_welcomed": 0, "today_welcomed": 0, "last_reset": datetime.now().date()}
-BOT_CONFIG = {}
+BOT_CONFIG = {"auto_replies": {}, "auto_reply_active": False, "target_spam": {}, "spam_active": {}, "media_library": {}}
 
 def log(msg):
     ts = datetime.now().strftime('%H:%M:%S')
-    lm = f"[{ts}] {msg}"
+    lm = "[" + ts + "] " + msg
     LOGS.append(lm)
     print(lm)
-
-def load_session():
-    try:
-        if os.path.exists(SESSION_FILE):
-            with open(SESSION_FILE, 'r') as f:
-                data = json.load(f)
-                log("📁 Session loaded successfully")
-                return data
-    except Exception as e:
-        log(f"⚠️ Session load error: {str(e)}")
-        if os.path.exists(SESSION_FILE):
-            os.remove(SESSION_FILE)
-    return None
-
-def login_client():
-    global SESSION_TOKEN
-    cl = Client()
-    
-    # Try session first
-    session_data = load_session()
-    if session_data:
-        try:
-            cl.load_settings(SESSION_FILE)
-            cl.account_info()
-            log("✅ Session login OK!")
-            return cl
-        except Exception as e:
-            log(f"⚠️ Session invalid: {str(e)}")
-            if os.path.exists(SESSION_FILE):
-                os.remove(SESSION_FILE)
-    
-    # Try token login
-    if SESSION_TOKEN:
-        try:
-            cl.login_by_sessionid(SESSION_TOKEN)
-            cl.dump_settings(SESSION_FILE)
-            log("✅ Token login OK!")
-            return cl
-        except Exception as e:
-            log(f"⚠️ Token fail: {str(e)[:50]}")
-    
-    log("🛑 No valid login method!")
-    return None
 
 MUSIC_EMOJIS = ["🎵", "🎶", "🎸", "🎹", "🎤", "🎧", "🎺", "🎷"]
 FUNNY = ["Hahaha! 😂", "LOL! 🤣", "Mast! 😆", "Pagal! 🤪", "King! 👑😂"]
 MASTI = ["Party! 🎉", "Masti! 🥳", "Dhamaal! 💃", "Full ON! 🔥", "Enjoy! 🎊"]
 
-def run_bot():
-    cl = login_client()
-    if not cl:
-        log("🛑 Login failed! Check token/session")
+def run_bot(un, pw, wm, gids, dly, pol, ucn, ecmd, admin_ids):
+    cl = Client()
+    try:
+        if os.path.exists(SESSION_FILE):
+            cl.load_settings(SESSION_FILE)
+            cl.login(un, pw)
+            log("Session loaded")
+        else:
+            cl.login(un, pw)
+            cl.dump_settings(SESSION_FILE)
+            log("Session saved")
+    except Exception as e:
+        log("Login failed: " + str(e))
         return
-
-    welcome_raw = BOT_CONFIG.get('welcome', 'Welcome!')
-    welcome_messages = [m.strip() for m in welcome_raw.split('') if m.strip()]
-    group_ids = [g.strip() for g in BOT_CONFIG.get('group_ids', '').split(',') if g.strip()]
-    admin_ids = [a.strip().lower() for a in BOT_CONFIG.get('admin_ids', '').split(',') if a.strip()]
-    
-    log("🚀 Bot started with token!")
-    log(f"Groups: {len(group_ids)} | Admins: {len(admin_ids)}")
-    
-    known_members = {}
-    last_messages = {}
-    
-    # Initialize groups
-    for gid in group_ids:
+    log("Bot started!")
+    log("Admins: " + str(admin_ids))
+    km = {}
+    lm = {}
+    for gid in gids:
         try:
-            group = cl.direct_thread(gid)
-            known_members[gid] = {user.pk for user in group.users}
-            last_messages[gid] = group.messages[0].id if group.messages else None
-            log(f"📊 Group {gid[:10]}... ready ({len(known_members[gid])} members)")
+            g = cl.direct_thread(gid)
+            km[gid] = {u.pk for u in g.users}
+            lm[gid] = g.messages[0].id if g.messages else None
+            BOT_CONFIG["spam_active"][gid] = False
+            log("Group " + gid + " ready")
         except Exception as e:
-            log(f"⚠️ Group {gid[:10]}... error: {str(e)[:30]}")
-            known_members[gid] = set()
-            last_messages[gid] = None
-
+            log("Error: " + str(e))
+            km[gid] = set()
+            lm[gid] = None
     global STATS
     if STATS["last_reset"] != datetime.now().date():
         STATS["today_welcomed"] = 0
         STATS["last_reset"] = datetime.now().date()
-
     while not STOP_EVENT.is_set():
         try:
-            for gid in group_ids:
+            for gid in gids:
                 if STOP_EVENT.is_set():
                     break
-                    
                 try:
-                    group = cl.direct_thread(gid)
-                    current_members = {user.pk for user in group.users}
-                    
-                    # Welcome new members
-                    new_members = current_members - known_members[gid]
-                    if new_members:
-                        for user in group.users:
-                            if user.pk in new_members and user.username:
+                    g = cl.direct_thread(gid)
+                    if BOT_CONFIG["spam_active"].get(gid, False):
+                        tu = BOT_CONFIG["target_spam"].get(gid, {}).get("username")
+                        sm = BOT_CONFIG["target_spam"].get(gid, {}).get("message")
+                        if tu and sm:
+                            cl.direct_send("@" + tu + " " + sm, thread_ids=[gid])
+                            log("Spam to @" + tu)
+                            time.sleep(2)
+                    if ecmd or BOT_CONFIG["auto_reply_active"]:
+                        nm = []
+                        if lm[gid]:
+                            for m in g.messages:
+                                if m.id == lm[gid]:
+                                    break
+                                nm.append(m)
+                        for m in reversed(nm):
+                            if m.user_id == cl.user_id:
+                                continue
+                            sender = next((u for u in g.users if u.pk == m.user_id), None)
+                            if not sender:
+                                continue
+                            su = sender.username.lower()
+                            ia = su in [a.lower() for a in admin_ids] if admin_ids else True
+                            t = m.text.strip() if m.text else ""
+                            tl = t.lower()
+                            if BOT_CONFIG["auto_reply_active"] and tl in BOT_CONFIG["auto_replies"]:
+                                cl.direct_send(BOT_CONFIG["auto_replies"][tl], thread_ids=[gid])
+                                log("Auto-reply sent")
+                            if not ecmd:
+                                continue
+                            if tl in ["/help", "!help"]:
+                                cl.direct_send("COMMANDS: /autoreply /stopreply /addvideo /addaudio /video /audio /library /music /funny /masti /kick /spam /stopspam /rules /stats /count /ping /time /about /welcome", thread_ids=[gid])
+                                log("Help sent")
+                            elif tl in ["/stats", "!stats"]:
+                                cl.direct_send("STATS - Total: " + str(STATS['total_welcomed']) + " Today: " + str(STATS['today_welcomed']), thread_ids=[gid])
+                            elif tl in ["/count", "!count"]:
+                                cl.direct_send("MEMBERS: " + str(len(g.users)), thread_ids=[gid])
+                            elif tl in ["/welcome", "!welcome"]:
+                                cl.direct_send("@" + sender.username + " Test!", thread_ids=[gid])
+                            elif tl in ["/ping", "!ping"]:
+                                cl.direct_send("Pong! Alive!", thread_ids=[gid])
+                            elif tl in ["/time", "!time"]:
+                                cl.direct_send("TIME: " + datetime.now().strftime("%I:%M %p"), thread_ids=[gid])
+                            elif tl in ["/about", "!about"]:
+                                cl.direct_send("Instagram Bot v3.0 - Full Featured", thread_ids=[gid])
+                            elif tl.startswith("/autoreply "):
+                                p = t.split(" ", 2)
+                                if len(p) >= 3:
+                                    BOT_CONFIG["auto_replies"][p[1].lower()] = p[2]
+                                    BOT_CONFIG["auto_reply_active"] = True
+                                    cl.direct_send("Auto-reply set: " + p[1] + " -> " + p[2], thread_ids=[gid])
+                            elif tl in ["/stopreply", "!stopreply"]:
+                                BOT_CONFIG["auto_reply_active"] = False
+                                BOT_CONFIG["auto_replies"] = {}
+                                cl.direct_send("Auto-reply stopped!", thread_ids=[gid])
+                            elif ia and tl.startswith("/addvideo "):
+                                p = t.split(" ", 3)
+                                if len(p) >= 4:
+                                    BOT_CONFIG["media_library"][p[1].lower()] = {"type": "video", "format": p[2].upper(), "link": p[3]}
+                                    cl.direct_send("Video saved: " + p[1], thread_ids=[gid])
+                            elif ia and tl.startswith("/addaudio "):
+                                p = t.split(" ", 2)
+                                if len(p) >= 3:
+                                    BOT_CONFIG["media_library"][p[1].lower()] = {"type": "audio", "link": p[2]}
+                                    cl.direct_send("Audio saved: " + p[1], thread_ids=[gid])
+                            elif tl.startswith("/video "):
+                                p = t.split(" ", 1)
+                                if len(p) >= 2:
+                                    n = p[1].lower()
+                                    if n in BOT_CONFIG["media_library"] and BOT_CONFIG["media_library"][n]["type"] == "video":
+                                        md = BOT_CONFIG["media_library"][n]
+                                        cl.direct_send("VIDEO: " + p[1].upper() + " | Type: " + md.get("format", "VIDEO") + " | Watch: " + md["link"], thread_ids=[gid])
+                                    else:
+                                        cl.direct_send("Video not found!", thread_ids=[gid])
+                            elif tl.startswith("/audio "):
+                                p = t.split(" ", 1)
+                                if len(p) >= 2:
+                                    n = p[1].lower()
+                                    if n in BOT_CONFIG["media_library"] and BOT_CONFIG["media_library"][n]["type"] == "audio":
+                                        md = BOT_CONFIG["media_library"][n]
+                                        cl.direct_send("AUDIO: " + p[1].upper() + " | Listen: " + md["link"], thread_ids=[gid])
+                                    else:
+                                        cl.direct_send("Audio not found!", thread_ids=[gid])
+                            elif tl in ["/library", "!library"]:
+                                if BOT_CONFIG["media_library"]:
+                                    vids = [k for k, v in BOT_CONFIG["media_library"].items() if v["type"] == "video"]
+                                    auds = [k for k, v in BOT_CONFIG["media_library"].items() if v["type"] == "audio"]
+                                    msg = "LIBRARY | Videos: " + ", ".join(vids) if vids else "" + " | Audios: " + ", ".join(auds) if auds else ""
+                                    cl.direct_send(msg, thread_ids=[gid])
+                                else:
+                                    cl.direct_send("Library empty!", thread_ids=[gid])
+                            elif tl in ["/music", "!music"]:
+                                cl.direct_send("Music! " + " ".join(random.choices(MUSIC_EMOJIS, k=5)), thread_ids=[gid])
+                            elif tl in ["/funny", "!funny"]:
+                                cl.direct_send(random.choice(FUNNY), thread_ids=[gid])
+                            elif tl in ["/masti", "!masti"]:
+                                cl.direct_send(random.choice(MASTI), thread_ids=[gid])
+                            elif ia and tl.startswith("/kick "):
+                                p = t.split(" ", 1)
+                                if len(p) >= 2:
+                                    ku = p[1].replace("@", "")
+                                    tg = next((u for u in g.users if u.username.lower() == ku.lower()), None)
+                                    if tg:
+                                        try:
+                                            cl.direct_thread_remove_user(gid, tg.pk)
+                                            cl.direct_send("Kicked @" + tg.username, thread_ids=[gid])
+                                        except:
+                                            cl.direct_send("Cannot kick", thread_ids=[gid])
+                            elif tl in ["/rules", "!rules"]:
+                                cl.direct_send("RULES: 1.Respect 2.No spam 3.Follow guidelines 4.Have fun!", thread_ids=[gid])
+                            elif ia and tl.startswith("/spam "):
+                                p = t.split(" ", 2)
+                                if len(p) >= 3:
+                                    BOT_CONFIG["target_spam"][gid] = {"username": p[1].replace("@", ""), "message": p[2]}
+                                    BOT_CONFIG["spam_active"][gid] = True
+                                    cl.direct_send("Spam started", thread_ids=[gid])
+                            elif ia and tl in ["/stopspam", "!stopspam"]:
+                                BOT_CONFIG["spam_active"][gid] = False
+                                cl.direct_send("Spam stopped!", thread_ids=[gid])
+                        if g.messages:
+                            lm[gid] = g.messages[0].id
+                    cm = {u.pk for u in g.users}
+                    nwm = cm - km[gid]
+                    if nwm:
+                        for u in g.users:
+                            if u.pk in nwm and u.username != un:
                                 if STOP_EVENT.is_set():
                                     break
-                                log(f"🎉 NEW: @{user.username}")
-                                for msg in welcome_messages:
+                                log("NEW: @" + u.username)
+                                for ms in wm:
                                     if STOP_EVENT.is_set():
                                         break
-                                    final_msg = f"@{user.username} {msg}" if BOT_CONFIG.get('mention', 'yes') == 'yes' else msg
-                                    cl.direct_send(final_msg, thread_ids=[gid])
+                                    fm = ("@" + u.username + " " + ms) if ucn else ms
+                                    cl.direct_send(fm, thread_ids=[gid])
                                     STATS["total_welcomed"] += 1
                                     STATS["today_welcomed"] += 1
-                                    log(f"✅ Welcomed @{user.username}")
-                                    time.sleep(int(BOT_CONFIG.get('delay', 3)))
-                                known_members[gid].add(user.pk)
-                    
-                    known_members[gid] = current_members
-                    
-                except Exception as e:
-                    log(f"⚠️ Group error: {str(e)[:50]}")
-            
-            time.sleep(int(BOT_CONFIG.get('poll', 10)))
-            
-        except Exception as e:
-            log(f"⚠️ Bot loop error: {str(e)[:50]}")
-            time.sleep(10)
-
-    log("🛑 Bot stopped completely!")
+                                    log("Welcomed @" + u.username)
+                                    time.sleep(dly)
+                                km[gid].add(u.pk)
+                    km[gid] = cm
+                except:
+                    pass
+            time.sleep(pol)
+        except:
+            pass
+    log("Stopped")
 
 @app.route("/")
 def index():
     return render_template_string(PAGE_HTML)
 
-@app.route("/set_token", methods=["POST"])
-def set_token():
-    global SESSION_TOKEN, BOT_CONFIG
-    token = request.form.get("token", "").strip()
-    if token:
-        SESSION_TOKEN = token
-        BOT_CONFIG.update({
-            'token': token,
-            'welcome': request.form.get("welcome","Welcome brother! 🔥Glad you joined! 👋"),
-            'group_ids': request.form.get("group_ids", ""),
-            'admin_ids': request.form.get("admin_ids", ""),
-            'delay': request.form.get("delay", "3"),
-            'poll': request.form.get("poll", "10"),
-            'mention': request.form.get("mention", "yes")
-        })
-        log("🔑 Token set successfully!")
-        return jsonify({"status": "success", "message": "Token saved!"})
-    return jsonify({"status": "error", "message": "Token required!"})
-
 @app.route("/start", methods=["POST"])
 def start_bot():
     global BOT_THREAD, STOP_EVENT
     if BOT_THREAD and BOT_THREAD.is_alive():
-        return jsonify({"status": "running", "message": "Already running!"})
-    
-    if not SESSION_TOKEN:
-        return jsonify({"status": "error", "message": "Set token first!"})
-    
-    if not BOT_CONFIG.get('group_ids') or not BOT_CONFIG.get('welcome'):
-        return jsonify({"status": "error", "message": "Fill groups & welcome message!"})
-    
+        return jsonify({"message": "Running"})
+    un = request.form.get("username")
+    pw = request.form.get("password")
+    wl = [m.strip() for m in request.form.get("welcome", "").splitlines() if m.strip()]
+    gids = [g.strip() for g in request.form.get("group_ids", "").split(",") if g.strip()]
+    adm = [a.strip() for a in request.form.get("admin_ids", "").split(",") if a.strip()]
+    if not un or not pw or not gids or not wl:
+        return jsonify({"message": "Fill fields"})
     STOP_EVENT.clear()
-    BOT_THREAD = threading.Thread(target=run_bot, daemon=True)
+    BOT_THREAD = threading.Thread(target=run_bot, args=(un, pw, wl, gids, int(request.form.get("delay", 3)), int(request.form.get("poll", 5)), request.form.get("use_custom_name") == "yes", request.form.get("enable_commands") == "yes", adm), daemon=True)
     BOT_THREAD.start()
-    log("🚀 24x7 Bot thread started!")
-    return jsonify({"status": "started", "message": "Bot started!"})
+    return jsonify({"message": "Started!"})
 
 @app.route("/stop", methods=["POST"])
 def stop_bot():
-    global BOT_THREAD
     STOP_EVENT.set()
-    log("🛑 Stop signal received!")
-    return jsonify({"status": "stopping", "message": "Stopping..."})
+    return jsonify({"message": "Stopped!"})
 
 @app.route("/logs")
 def get_logs():
-    return jsonify({"logs": LOGS[-50:], "stats": STATS})
+    return jsonify({"logs": LOGS[-200:]})
 
-PAGE_HTML = '''<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TOKEN BOT v4</title>
-<style>
-* {margin:0;padding:0;box-sizing:border-box;font-family:Arial,sans-serif;}
-body {background:#000;color:#fff;padding:20px;min-height:100vh;}
-.card {max-width:500px;margin:0 auto;background:rgba(10,10,30,0.9);border-radius:20px;padding:30px;border:2px solid #00ff88;box-shadow:0 0 30px rgba(0,255,136,0.3);}
-h1 {text-align:center;color:#00ff88;font-size:2.5rem;margin-bottom:30px;text-shadow:0 0 20px #00ff88;}
-.input-group {margin-bottom:20px;}
-label {display:block;margin-bottom:8px;color:#00eaff;font-weight:bold;}
-input,textarea,select {width:100%;padding:15px;border:2px solid #00eaff;border-radius:10px;background:rgba(0,0,0,0.5);color:#fff;font-size:16px;}
-input:focus,textarea:focus,select:focus {outline:none;border-color:#00ff88;box-shadow:0 0 15px #00ff88;}
-textarea {min-height:100px;}
-.btn {width:100%;padding:18px;font-size:18px;font-weight:bold;border:none;border-radius:12px;cursor:pointer;margin:10px 0;transition:all 0.3s;}
-.btn-token {background:linear-gradient(45deg,#00ff88,#00cc66);color:#000;box-shadow:0 5px 20px rgba(0,255,136,0.4);}
-.btn-start {background:linear-gradient(45deg,#00eaff,#0072ff);color:#fff;box-shadow:0 5px 20px rgba(0,198,255,0.4);}
-.btn-stop {background:linear-gradient(45deg,#ff4757,#ff3838);color:#fff;box-shadow:0 5px 20px rgba(255,71,87,0.4);}
-.btn:hover {transform:translateY(-2px);box-shadow:0 8px 25px;}
-.logs {background:rgba(0,0,0,0.7);border:2px solid #00eaff;border-radius:15px;padding:20px;height:250px;overflow-y:auto;font-family:monospace;font-size:14px;line-height:1.5;color:#00ff88;margin-top:20px;}
-.status {text-align:center;padding:15px;border-radius:10px;margin:20px 0;font-weight:bold;}
-.success {background:rgba(0,255,136,0.2);border:2px solid #00ff88;color:#00ff88;}
-.error {background:rgba(255,71,87,0.2);border:2px solid #ff4757;color:#ff4757;}
-.stats {display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:15px;margin:20px 0;}
-.stat-card {background:rgba(0,255,136,0.1);border:2px solid #00ff88;border-radius:10px;padding:15px;text-align:center;}
-</style>
-</head>
-<body>
-<div class="card">
-<h1>🔑 TOKEN BOT v4</h1>
-
-<div id="status" class="status" style="display:none;"></div>
-
-<div class="input-group">
-<label>🔑 Session Token <span style="color:#ff4757;">*</span></label>
-<input type="text" id="token" placeholder="56748960230%3AF8ELTyGZTkSadW...">
-<button class="btn btn-token" onclick="setToken()">✅ SET TOKEN</button>
-</div>
-
-<div class="input-group">
-<label>💬 Welcome Messages</label>
-<textarea id="welcome">Welcome brother! 🔥
-Glad you joined our group! 👋
-Stay active 24x7! ⚡</textarea>
-</div>
-
-<div class="input-group">
-<label>👥 Group IDs <span style="color:#ff4757;">*</span></label>
-<input type="text" id="group_ids" placeholder="24632887389663044,12345678901234567">
-</div>
-
-<div class="input-group">
-<label>👑 Admin IDs (optional)</label>
-<input type="text" id="admin_ids" placeholder="username1,username2">
-</div>
-
-<div class="input-group">
-<label>⏱️ Delay (seconds)</label>
-<input type="number" id="delay" value="3" min="1" max="10">
-</div>
-
-<div class="input-group">
-<label>🔄 Poll (seconds)</label>
-<input type="number" id="poll" value="10" min="5" max="30">
-</div>
-
-<div class="input-group">
-<label>@mention?</label>
-<select id="mention">
-<option value="yes">✅ Yes</option>
-<option value="no">❌ No</option>
-</select>
-</div>
-
-<button class="btn btn-start" onclick="startBot()" id="startBtn" style="display:none;">▶️ START BOT</button>
-<button class="btn btn-stop" onclick="stopBot()" id="stopBtn" style="display:none;">🛑 STOP BOT</button>
-
-<div class="stats" id="stats" style="display:none;">
-<div class="stat-card"><strong>Total</strong><div id="totalCount">0</div></div>
-<div class="stat-card"><strong>Today</strong><div id="todayCount">0</div></div>
-</div>
-
-<div class="logs" id="logs">Ready to start bot... 📱</div>
-</div>
-
-<script>
-let botRunning = false;
-function showStatus(msg, type) {
-    const status = document.getElementById('status');
-    status.textContent = msg;
-    status.className = 'status ' + type;
-    status.style.display = 'block';
-    setTimeout(()=>status.style.display='none', 4000);
-}
-
-async function setToken() {
-    const token = document.getElementById('token').value.trim();
-    if(!token) {
-        showStatus('❌ Token required!', 'error');
-        return;
-    }
-    
-    try {
-        const form = new FormData();
-        form.append('token', token);
-        form.append('welcome', document.getElementById('welcome').value);
-        form.append('group_ids', document.getElementById('group_ids').value);
-        form.append('admin_ids', document.getElementById('admin_ids').value);
-        form.append('delay', document.getElementById('delay').value);
-        form.append('poll', document.getElementById('poll').value);
-        form.append('mention', document.getElementById('mention').value);
-        
-        const res = await fetch('/set_token', {method:'POST', body:form});
-        const data = await res.json();
-        
-        if(data.status === 'success') {
-            showStatus('✅ Token set! Ready to start', 'success');
-            document.getElementById('startBtn').style.display = 'block';
-        } else {
-            showStatus(data.message, 'error');
-        }
-    } catch(e) {
-        showStatus('❌ Network error!', 'error');
-    }
-}
-
-async function startBot() {
-    try {
-        const res = await fetch('/start', {method:'POST'});
-        const data = await res.json();
-        if(data.status === 'started') {
-            showStatus('🚀 Bot started successfully!', 'success');
-            botRunning = true;
-            document.getElementById('startBtn').style.display = 'none';
-            document.getElementById('stopBtn').style.display = 'block';
-            document.getElementById('stats').style.display = 'grid';
-        } else {
-            showStatus(data.message, 'error');
-        }
-    } catch(e) {
-        showStatus('❌ Start failed!', 'error');
-    }
-}
-
-async function stopBot() {
-    try {
-        const res = await fetch('/stop', {method:'POST'});
-        const data = await res.json();
-        showStatus('🛑 Bot stopping...', 'error');
-        botRunning = false;
-        document.getElementById('stopBtn').style.display = 'none';
-        document.getElementById('startBtn').style.display = 'block';
-    } catch(e) {
-        showStatus('❌ Stop failed!', 'error');
-    }
-}
-
-setInterval(async()=>{
-    try {
-        const res = await fetch('/logs');
-        const data = await res.json();
-        document.getElementById('logs').innerHTML = data.logs.slice(-15).map(l=>'<div>'+l+'</div>').join('') || 'No logs...';
-        document.getElementById('logs').scrollTop = 9999;
-        document.getElementById('totalCount').textContent = data.stats.total_welcomed || 0;
-        document.getElementById('todayCount').textContent = data.stats.today_welcomed || 0;
-    } catch(e) {}
-}, 2000);
-</script>
-</body>
-</html>'''
+PAGE_HTML = """<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NEON BOT</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;min-height:100vh;background:#000;position:relative;color:#fff;padding:15px}body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;background-image:url('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1920&q=80');background-size:cover;background-position:center;opacity:.4;z-index:-2}body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(circle at 20% 50%,rgba(0,200,255,.2),transparent 60%),radial-gradient(circle at 80% 80%,rgba(255,0,150,.2),transparent 60%);z-index:-1}.c{max-width:700px;margin:0 auto;background:rgba(10,10,30,.5);border-radius:20px;padding:25px;border:2px solid rgba(0,255,255,.5);box-shadow:0 0 30px rgba(0,255,255,.3)}h1{text-align:center;font-size:50px;font-weight:900;margin-bottom:25px;background:linear-gradient(90deg,#0ff 0%,#f0f 50%,#ff0 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:5px;filter:drop-shadow(0 0 2px rgba(0,255,255,.8))}label{display:block;margin:12px 0 5px;font-weight:600;font-size:13px}.f1{color:#0ff}.f2{color:#ff00ff}.f3{color:#00ff88}.f4{color:#ffaa00}.f5{color:#ff0066}.f6{color:#00ddff}.f7{color:#88ff00}.f8{color:#ff6600}input,textarea,select{width:100%;padding:10px;border-radius:10px;background:rgba(0,20,40,.6);color:#fff;font-size:14px;transition:all .3s}input:focus,textarea:focus,select:focus{outline:0;transform:scale(1.02)}.i1{border:2px solid rgba(0,255,255,.5)}.i1:focus{border-color:#0ff;box-shadow:0 0 15px rgba(0,255,255,.5)}.i2{border:2px solid rgba(255,0,255,.5)}.i2:focus{border-color:#f0f;box-shadow:0 0 15px rgba(255,0,255,.5)}.i3{border:2px solid rgba(0,255,136,.5)}.i3:focus{border-color:#0f8;box-shadow:0 0 15px rgba(0,255,136,.5)}.i4{border:2px solid rgba(255,170,0,.5)}.i4:focus{border-color:#fa0;box-shadow:0 0 15px rgba(255,170,0,.5)}.i5{border:2px solid rgba(255,0,102,.5)}.i5:focus{border-color:#f06;box-shadow:0 0 15px rgba(255,0,102,.5)}.i6{border:2px solid rgba(0,221,255,.5)}.i6:focus{border-color:#0df;box-shadow:0 0 15px rgba(0,221,255,.5)}.i7{border:2px solid rgba(136,255,0,.5)}.i7:focus{border-color:#8f0;box-shadow:0 0 15px rgba(136,255,0,.5)}.i8{border:2px solid rgba(255,102,0,.5)}.i8:focus{border-color:#f60;box-shadow:0 0 15px rgba(255,102,0,.5)}textarea{min-height:70px;resize:vertical}::placeholder{color:rgba(255,255,255,.4)}.bc{display:flex;justify-content:center;gap:15px;margin-top:25px}button{padding:12px 35px;font-size:16px;font-weight:700;border:none;border-radius:25px;cursor:pointer;text-transform:uppercase;transition:all .3s}.bs{background:linear-gradient(135deg,#0ff,#00a8cc);color:#000;box-shadow:0 0 20px rgba(0,255,255,.5)}.bp{background:linear-gradient(135deg,#f0f,#c00);color:#fff;box-shadow:0 0 20px rgba(255,0,255,.5)}.bs:hover,.bp:hover{transform:scale(1.08)}.ls{margin-top:30px}.lt{text-align:center;color:#0ff;font-size:20px;margin-bottom:15px;font-weight:700;text-shadow:0 0 10px rgba(0,255,255,.8)}.lb{background:rgba(0,0,0,.7);border:2px solid rgba(0,255,255,.4);border-radius:15px;padding:20px;height:200px;overflow-y:auto;font-family:monospace;font-size:13px;line-height:1.8;box-shadow:inset 0 0 20px rgba(0,255,255,.2)}.lb::-webkit-scrollbar{width:8px}.lb::-webkit-scrollbar-track{background:rgba(0,0,0,.5)}.lb::-webkit-scrollbar-thumb{background:linear-gradient(180deg,#0ff,#f0f);border-radius:5px}.le{color:#0ff;margin-bottom:5px;text-shadow:0 0 5px rgba(0,255,255,.5)}@media(max-width:768px){.c{padding:20px}h1{font-size:36px}.bc{flex-direction:column}button{width:100%}}</style></head><body><div class="c"><h1>NEON BOT</h1><form id="f"><label class="f1">USERNAME</label><input class="i1" name="username" placeholder="Instagram username"><label class="f2">PASSWORD</label><input class="i2" type="password" name="password" placeholder="Password"><label class="f3">ADMINS</label><input class="i3" name="admin_ids" placeholder="admin1,admin2"><label class="f4">WELCOME</label><textarea class="i4" name="welcome" placeholder="Welcome to group!
+Glad you joined!"></textarea><label class="f5">MENTION?</label><select class="i5" name="use_custom_name"><option value="yes">Yes</option><option value="no">No</option></select><label class="f6">COMMANDS?</label><select class="i6" name="enable_commands"><option value="yes">Yes</option></select><label class="f7">GROUPS</label><input class="i7" name="group_ids" placeholder="123456789,987654321"><label class="f8">DELAY</label><input class="i8" type="number" name="delay" value="3" min="1"><label class="f1">POLL</label><input class="i1" type="number" name="poll" value="5" min="3"><div class="bc"><button type="button" class="bs" onclick="start()">START</button><button type="button" class="bp" onclick="stop()">STOP</button></div></form><div class="ls"><div class="lt">LIVE LOGS</div><div class="lb" id="l">Waiting for bot...</div></div></div><script>async function start(){let r=await fetch('/start',{method:'POST',body:new FormData(document.getElementById('f'))});alert((await r.json()).message)}async function stop(){let r=await fetch('/stop',{method:'POST'});alert((await r.json()).message)}setInterval(async()=>{let r=await fetch('/logs');let d=await r.json();let b=document.getElementById('l');b.innerHTML=d.logs.map(l=>'<div class="le">'+l+'</div>').join('')||'Start bot...';b.scrollTop=b.scrollHeight},2000)</script></body></html>"""
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    print("🚀 TOKEN Instagram Welcome Bot v4.0")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
