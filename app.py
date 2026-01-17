@@ -5,10 +5,9 @@ import random
 from datetime import datetime
 from flask import Flask, render_template_string, request, jsonify
 from instagrapi import Client
-from instagrapi.exceptions import (
-    LoginRequired, ClientError, ClientLoginRequiredError, 
-    PrivateError, PleaseWaitFewMinutes
-)
+from instagrapi.exceptions import
+(LoginRequired, ClientError, ClientLoginRequiredError, 
+    PrivateError, PleaseWaitFewMinutes)
 
 app = Flask(__name__)
 
