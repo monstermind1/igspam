@@ -108,8 +108,7 @@ def run_bot(session_token, wm, gids, dly, pol, ucn, ecmd, admin_ids):
         log(f"✅ Session login success: @{me} (ID: {account_info.pk})")
         
     except Exception as e:
-        error_msg = str(e).split('
-')[0][:100]
+        error_msg = str(e).split('')[0][:100]
         log(f"❌ Session login failed: {error_msg}")
         log("💡 Fix: Get fresh session token from browser → F12 → Application → Local Storage → sessionid")
         return
