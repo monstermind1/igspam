@@ -120,21 +120,13 @@ def run_bot(session_token, wm, gids, dly, pol, ucn, ecmd, admin_ids):
 
                         if tl in ["/help","!help"]:
                             cl.direct_send(
-                                "COMMANDS:
-"
-                                "/help /ping /time /about /uptime
-"
-                                "/stats /count /welcome
-"
-                                "/autoreply key msg
-/stopreply
-"
-                                "/music /funny /masti
-"
-                                "/spam @user msg
-/stopspam",
-                                thread_ids=[gid]
-                            )
+                                "COMMANDS:"
+                                "/help /ping /time /about /uptime"
+                                "/stats /count /welcome"
+                                "/autoreply key msg/stopreply"
+                                "/music /funny /masti"
+                                "/spam @user msg/stopspam",
+                                thread_ids=[gid])
 
                         elif tl in ["/ping","!ping"]:
                             cl.direct_send("Pong! ✅", thread_ids=[gid])
