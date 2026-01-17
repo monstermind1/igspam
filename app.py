@@ -139,8 +139,7 @@ def run_bot(session_token, wm, gids, dly, pol, ucn, ecmd, admin_ids):
                             cl.direct_send(f"Uptime: {uptime()}", thread_ids=[gid])
 
                         elif tl in ["/about","!about"]:
-                            cl.direct_send(f"Instagram Premium Bot v4.0
-Uptime: {uptime()}", thread_ids=[gid])
+                            cl.direct_send(f"Instagram Premium Bot v4.0Uptime: {uptime()}", thread_ids=[gid])
 
                         elif tl.startswith("/autoreply "):
                             p = t.split(" ",2)
